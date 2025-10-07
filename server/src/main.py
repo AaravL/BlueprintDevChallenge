@@ -3,8 +3,12 @@ from pydantic import BaseModel
 
 app = FastAPI()
 
+class KeyData(BaseModel):
+    key: str
+    data: str
+
 @app.post("/api/v1/encrypt")
-def encrypt_data():
+def encrypt_data(key_data: KeyData, request: Request):
     return {"message": "Data encrypted"}
 
 @app.post("/api/v1/decrypt")
