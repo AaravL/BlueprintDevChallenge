@@ -18,5 +18,5 @@ jobs:
 
       - name: Run ruff linter
         run: |
-          # run ruff against the server package/folder; fail the job on issues
-          ruff server
+          # lint server/ in check mode (do not start the ruff language server)
+          ruff check server
