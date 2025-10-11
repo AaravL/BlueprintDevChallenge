@@ -1,17 +1,21 @@
 # Blueprint Dev Challenge — SecureLog
 
 Overview
+This setup was tested and worked on Windows 11.
 
 - Frontend: React + Vite (web/)
-- Backend: FastAPI (server/) — encrypt/decrypt endpoints (RSA) + logs stored in Postgres
+- Backend: FastAPI (server/) — RSA encrypt/decrypt endpoints + logs stored in Postgres
 - DB: PostgreSQL (db service in docker-compose)
 
 Run locally (Docker)
 
 1. From repo root:
+
+   ```powershell
    docker compose down -v
    docker compose build --no-cache
    docker compose up -d
+   ```
 
 2. Visit:
    - Frontend: http://localhost:5173
@@ -29,15 +33,25 @@ Generate RSA keypair (example)
 
 Sample API requests
 
-- Encrypt (use public.pem). Example using jq to embed PEM into JSON (Linux/macOS):
+- Encrypt (use public.pem).
 
-  ```bash
-  curl -s -X POST http://localhost:8000/api/v1/encrypt \
-    -H "Content-Type: application/json" \
-    -d "$(jq -n --arg k "$(cat public.pem)" --arg d "hello" '{key:$k,data:$d}')" | jq
-  ```
+  Option A — create a JSON payload file (recommended to preserve PEM formatting):
 
-  PowerShell (Windows):
+  1. Create payload.json with contents (make sure newlines in the PEM are preserved or escaped):
+     ```json
+     {
+       "key": "-----BEGIN PUBLIC KEY-----\n...your public key...\n-----END PUBLIC KEY-----\n",
+       "data": "hello"
+     }
+     ```
+  2. Send with curl:
+     ```bash
+     curl -s -X POST http://localhost:8000/api/v1/encrypt \
+       -H "Content-Type: application/json" \
+       --data-binary @payload.json
+     ```
+
+  Option B — PowerShell (Windows):
 
   ```powershell
   $pub = Get-Content -Raw public.pem
@@ -45,24 +59,41 @@ Sample API requests
   curl.exe -s -X POST http://localhost:8000/api/v1/encrypt -H "Content-Type: application/json" -d $body
   ```
 
-- Decrypt (use private.pem). Example (Linux/macOS):
+- Decrypt (use private.pem).
+
+  Option A — payload file:
+
+  ```json
+  {
+    "key": "-----BEGIN PRIVATE KEY-----\n...your private key...\n-----END PRIVATE KEY-----\n",
+    "data": "<base64 ciphertext>"
+  }
+  ```
 
   ```bash
-  # assume $CIPHERTEXT contains base64 ciphertext from encrypt response
   curl -s -X POST http://localhost:8000/api/v1/decrypt \
     -H "Content-Type: application/json" \
-    -d "$(jq -n --arg k "$(cat private.pem)" --arg d "$CIPHERTEXT" '{key:$k,data:$d}')" | jq
+    --data-binary @payload_decrypt.json
+  ```
+
+  Option B — PowerShell (Windows):
+
+  ```powershell
+  $cipher = "<base64-from-encrypt>"
+  $priv = Get-Content -Raw private.pem
+  $body = @{ key = $priv; data = $cipher } | ConvertTo-Json
+  curl.exe -s -X POST http://localhost:8000/api/v1/decrypt -H "Content-Type: application/json" -d $body
   ```
 
 - Logs (paginated)
 
   ```bash
-  curl -s "http://localhost:8000/api/v1/logs?size=25&offset=0" | jq
+  curl -s "http://localhost:8000/api/v1/logs?size=25&offset=0"
   ```
 
 - Total logs
   ```bash
-  curl -s "http://localhost:8000/api/v1/logs/count" | jq
+  curl -s "http://localhost:8000/api/v1/logs/count"
   ```
 
 Notes / API contract
@@ -75,9 +106,34 @@ Notes / API contract
 Rebuild & test
 
 ```powershell
-cd C:\Users\Aarav\Documents\Schoolwork\BlueprintDevChallenge
 docker compose down -v
 docker compose build --no-cache
 docker compose up -d
 docker compose logs -f server web db
 ```
+
+Linting / CI
+
+- Server dev requirements: server/dev-requirements.txt (ruff, pytest, black)
+- Workflows:
+  - .github/workflows/server-lint.yml runs ruff (ruff check server)
+  - .github/workflows/web-lint.yml runs TypeScript check (npx tsc --noEmit)
+- To run linters locally (PowerShell):
+
+  ```powershell
+  python -m venv .venv
+  .\.venv\Scripts\Activate
+  pip install --upgrade pip
+  pip install -r server/dev-requirements.txt
+  ruff check server
+
+  cd web
+  npm ci
+  npx tsc --noEmit
+  ```
+
+Notes / important
+
+- CORS is set to allow all origins for local development. Restrict this before production.
+- Private-key password support is not implemented (private PEM must be unencrypted).
+- Ensure server Dockerfile runs Uvicorn with `--host 0.0.0.0` and docker-compose maps port 8000:8000.
