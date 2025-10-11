@@ -22,12 +22,14 @@ Notes:
 
 from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel
-from typing import List, Optional, Dict, Any
-import os, time, uuid, base64
-import psycopg2
+from typing import List, Optional, Dict
+
+import os
+import time
+import uuid
+import base64
 from cryptography.hazmat.primitives import serialization, hashes
 from cryptography.hazmat.primitives.asymmetric import padding
-from cryptography.exceptions import InvalidKey
 from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI()
@@ -87,9 +89,14 @@ def startup_event():
     init_db()
 
 def _client_ip(request: Optional[Request]) -> str:
-    if not request: return "-"
+    if not request:
+        return "-"
     try:
-        return request.client.host or "-"
+        client = request.client
+        if client and client.host:
+            return client.host
+        xff = request.headers.get("x-forwarded-for")
+        return xff.split(",")[0].strip() if xff else "-"
     except Exception:
         return "-"
 
