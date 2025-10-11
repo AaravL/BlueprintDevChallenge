@@ -28,8 +28,19 @@ import psycopg2
 from cryptography.hazmat.primitives import serialization, hashes
 from cryptography.hazmat.primitives.asymmetric import padding
 from cryptography.exceptions import InvalidKey
+from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI()
+
+# allow the frontend origin
+app.add_middleware(
+    CORSMiddleware,
+    # allow all origins during development so the browser can reach the API
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 class KeyData(BaseModel):
     key: str
