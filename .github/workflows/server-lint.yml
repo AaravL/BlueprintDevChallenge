@@ -5,11 +5,18 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: "3.11"
+
       - name: Install dev dependencies
-        run: pip install -r server/dev-requirements.txt
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r server/dev-requirements.txt
+
       - name: Run ruff linter
-        run: ruff server
+        run: |
+          # run ruff against the server package/folder; fail the job on issues
+          ruff server
