@@ -135,5 +135,4 @@ Linting / CI
 Notes / important
 
 - CORS is set to allow all origins for local development. Restrict this before production.
-- Private-key password support is not implemented (private PEM must be unencrypted).
 - Ensure server Dockerfile runs Uvicorn with `--host 0.0.0.0` and docker-compose maps port 8000:8000.
