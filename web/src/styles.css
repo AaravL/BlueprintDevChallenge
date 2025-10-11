@@ -1,0 +1,112 @@
+/* New visual styling for the frontend */
+:root{
+  --bg: #f6f8fb;
+  --card: #ffffff;
+  --muted: #6b7280;
+  --accent: #2563eb;
+  --accent-600: #1e40af;
+  --border: #e6e9ef;
+  --mono-bg: #f3f4f6;
+  --shadow: 0 6px 18px rgba(11,22,40,0.06);
+  font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
+  color-scheme: light;
+}
+
+*{box-sizing:border-box}
+html,body,#root{height:100%}
+body{
+  margin:0;
+  background:var(--bg);
+  color:#0b1220;
+  -webkit-font-smoothing:antialiased;
+  -moz-osx-font-smoothing:grayscale;
+  font-size:15px;
+  line-height:1.45;
+}
+
+.app {
+  max-width:1100px;
+  margin:28px auto;
+  padding:18px;
+}
+
+/* header */
+.app-header{
+  background:linear-gradient(90deg, rgba(37,99,235,0.06), rgba(37,99,235,0.02));
+  border-radius:10px;
+  padding:14px 18px;
+  margin-bottom:18px;
+  box-shadow: var(--shadow);
+  display:flex;
+  align-items:center;
+}
+.brand{display:flex;gap:12px;align-items:center}
+.logo{
+  width:52px;height:52px;border-radius:10px;
+  display:flex;align-items:center;justify-content:center;
+  background:linear-gradient(180deg,#2563eb,#1e40af);
+  color:#fff;font-weight:700;font-size:22px;
+  box-shadow: 0 6px 18px rgba(37,99,235,0.12);
+}
+.app-header h1{margin:0;font-size:18px}
+.subtitle{font-size:13px;color:var(--muted);margin-top:4px}
+
+/* main layout - rely on Forms component to include grid */
+.app-main{
+  margin-top:12px;
+}
+
+/* card used by Forms children (keeps compatibility) */
+.card{
+  background:var(--card);
+  border-radius:10px;
+  padding:14px;
+  border:1px solid var(--border);
+  box-shadow: 0 2px 8px rgba(11,22,40,0.03);
+}
+
+/* small utility */
+.muted{color:var(--muted);font-size:13px}
+.mono{font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, "Roboto Mono", monospace;background:var(--mono-bg);padding:8px;border-radius:6px;overflow:auto}
+
+/* forms styling (keeps compatibility with existing markup from AppFuncs) */
+.form label{display:block;font-weight:600;margin-top:10px;margin-bottom:6px}
+input[type="text"], input[type="password"], textarea, input {
+  width:100%;
+  padding:10px 12px;
+  border-radius:8px;
+  border:1px solid var(--border);
+  background: #fff;
+  font-size:14px;
+}
+textarea{min-height:88px;resize:vertical}
+.row{display:flex;gap:8px;margin-top:12px;align-items:center}
+button{
+  background:var(--accent);
+  color:#fff;border:none;padding:9px 14px;border-radius:8px;
+  cursor:pointer;font-weight:600;
+  box-shadow: 0 6px 14px rgba(37,99,235,0.08);
+}
+button.secondary{background:#e6eefc;color:var(--accent-600);box-shadow:none}
+button[disabled]{opacity:.6;cursor:not-allowed}
+
+/* logs table */
+.table-wrap{overflow:auto;margin-top:10px}
+.logs{width:100%;border-collapse:collapse;font-size:13px}
+.logs th,.logs td{text-align:left;padding:10px;border-bottom:1px solid #f0f3f7}
+.logs th{font-weight:700;color:var(--muted);font-size:12px}
+.logs td.mono{font-family:ui-monospace,Menlo,monospace;font-size:13px}
+.logs tr:nth-child(even){background:#fbfcff}
+
+/* footer */
+.app-footer{display:flex;justify-content:space-between;align-items:center;margin-top:18px;color:var(--muted);font-size:13px;padding:8px 4px}
+
+/* responsive */
+@media (min-width:900px){
+  /* improve spacing when wide */
+  .app-main .grid { gap:18px }
+}
+@media (max-width:800px){
+  .app{padding:12px}
+  .brand .subtitle{display:none}
+}
