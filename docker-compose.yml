@@ -4,9 +4,9 @@ services:
   db:
     image: postgres:15
     environment:
+      POSTGRES_DB: appdb
       POSTGRES_USER: appuser
       POSTGRES_PASSWORD: secretpassword
-      POSTGRES_DB: appdb
     volumes:
       - db-data:/var/lib/postgresql/data
     ports:
@@ -17,16 +17,16 @@ services:
       context: ./server
       dockerfile: Dockerfile
     environment:
-      - DATABASE_URL=postgresql://appuser:secretpassword@db:5432/appdb
-    depends_on:
-      - db
+      DATABASE_URL: postgresql://appuser:secretpassword@db:5432/appdb
     ports:
       - "8000:8000"
-    restart: on-failure
+    depends_on:
+      - db
 
   web:
     build:
       context: ./web
+      dockerfile: Dockerfile
       args:
         VITE_API_URL: "http://localhost:8000"
     ports:

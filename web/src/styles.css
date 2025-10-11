@@ -56,6 +56,19 @@ body{
   margin-top:12px;
 }
 
+/* keep components vertical (single column) so Encrypt and Decrypt stack */
+.grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 18px;
+}
+
+/* add extra spacing inside card controls */
+.controls { gap: 8px; display:flex; align-items:center; flex-wrap:wrap }
+
+/* increase vertical rhythm between stacked cards */
+.card { margin-bottom: 8px; }
+
 /* card used by Forms children (keeps compatibility) */
 .card{
   background:var(--card);
