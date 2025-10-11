@@ -28,6 +28,7 @@ import os
 import time
 import uuid
 import base64
+import psycopg2
 from cryptography.hazmat.primitives import serialization, hashes
 from cryptography.hazmat.primitives.asymmetric import padding
 from fastapi.middleware.cors import CORSMiddleware
