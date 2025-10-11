@@ -1,41 +1,50 @@
-from fastapi import FastAPI, HTTPException, Request
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-from cryptography.fernet import Fernet, InvalidToken
-import os
-import time
-import uuid
-from typing import Any, Dict, List, Optional
+"""
+FastAPI RSA Encrypt/Decrypt API
 
+Endpoints:
+- POST /api/v1/encrypt
+  Accepts JSON { "key": "<RSA public PEM>", "data": "<plaintext>" }
+  Returns { "data": "<base64 ciphertext>" }.
+
+- POST /api/v1/decrypt
+  Accepts JSON { "key": "<RSA private PEM>", "data": "<base64 ciphertext>" }
+  Returns { "data": "<plaintext>" }.
+
+- GET /api/v1/logs?size=<n>&offset=<m>
+  Returns an array of logs (paginated) with objects exactly:
+    { "id": string (UUID), "timestamp": int (UNIX seconds), "ip": string, "data": string }
+
+Notes:
+- RSA OAEP with SHA-256 is used for encryption/decryption.
+- Encrypted payloads are base64-encoded when returned by /encrypt.
+- Logs are persisted in PostgreSQL; id is UUID and timestamp is UNIX seconds.
+"""
+
+from fastapi import FastAPI, HTTPException, Request
+from pydantic import BaseModel
+from typing import List, Optional, Dict, Any
+import os, time, uuid, base64
 import psycopg2
+from cryptography.hazmat.primitives import serialization, hashes
+from cryptography.hazmat.primitives.asymmetric import padding
+from cryptography.exceptions import InvalidKey
 
 app = FastAPI()
-
-# allow the frontend origin
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
 
 class KeyData(BaseModel):
     key: str
     data: str
 
+class LogEntry(BaseModel):
+    id: str
+    timestamp: int      # UNIX seconds
+    ip: Optional[str]
+    data: Optional[str]
 
-# Database handling: prefer PostgreSQL when DATABASE_URL is provided and psycopg2 is available.
-DATABASE_URL = os.getenv("DATABASE_URL")
-if not DATABASE_URL:
-    raise RuntimeError("DATABASE_URL environment variable must be set to a Postgres DSN (postgresql://user:pass@host:port/db)")
+DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://appuser:secretpassword@db:5432/appdb")
+_db = None
 
-DB_CONN = None
-
-
-def wait_for_db(dsn: str, timeout: int = 30, interval: float = 1.0):
-    """Wait until Postgres accepts connections or raise after timeout."""
+def wait_for_db(dsn: str, timeout: int = 60):
     deadline = time.time() + timeout
     while time.time() < deadline:
         try:
@@ -43,113 +52,111 @@ def wait_for_db(dsn: str, timeout: int = 30, interval: float = 1.0):
             conn.close()
             return
         except Exception:
-            time.sleep(interval)
-    raise RuntimeError("Timed out waiting for database")
-
+            time.sleep(1)
+    raise RuntimeError("DB did not become available")
 
 def init_db():
-    global DB_CONN
-    wait_for_db(DATABASE_URL, timeout=60)
-    DB_CONN = psycopg2.connect(DATABASE_URL)
-    cur = DB_CONN.cursor()
-    cur.execute(
-        """
-        CREATE TABLE IF NOT EXISTS logs (
-            id UUID PRIMARY KEY,
-            timestamp BIGINT NOT NULL,
-            ip TEXT,
-            action TEXT,
-            data TEXT
-        );
-        """
-    )
-    DB_CONN.commit()
-
+    global _db
+    wait_for_db(DATABASE_URL)
+    _db = psycopg2.connect(DATABASE_URL)
+    cur = _db.cursor()
+    cur.execute("""
+      CREATE TABLE IF NOT EXISTS logs (
+        id UUID PRIMARY KEY,
+        timestamp BIGINT NOT NULL,
+        ip TEXT,
+        action TEXT,
+        data TEXT
+      );
+    """)
+    _db.commit()
 
 @app.on_event("startup")
-def startup():
+def startup_event():
     init_db()
 
-
-def _get_client_ip(request: Optional[Request]) -> str:
-    if not request:
-        return "-"
+def _client_ip(request: Optional[Request]) -> str:
+    if not request: return "-"
     try:
-        client = request.client
-        if client and client.host:
-            return client.host
-        xff = request.headers.get("x-forwarded-for")
-        return xff.split(",")[0].strip() if xff else "-"
+        return request.client.host or "-"
     except Exception:
         return "-"
-
 
 def insert_log(action: str, data: str, request: Optional[Request] = None) -> str:
-    global DB_CONN
+    global _db
     ts = int(time.time())
-    ip = _get_client_ip(request)
+    ip = _client_ip(request)
     log_id = str(uuid.uuid4())
-    cur = DB_CONN.cursor()
+    cur = _db.cursor()
     cur.execute(
-        "INSERT INTO logs (id, timestamp, ip, action, data) VALUES (%s, %s, %s, %s, %s)",
-        (log_id, ts, ip, action, data),
+      "INSERT INTO logs (id, timestamp, ip, action, data) VALUES (%s, %s, %s, %s, %s)",
+      (log_id, ts, ip, action, data)
     )
-    DB_CONN.commit()
+    _db.commit()
     return log_id
 
-
-@app.post("/api/v1/encrypt")
-def encrypt_payload(payload: KeyData, request: Request):
-    if not payload.key or not payload.data:
+@app.post("/api/v1/encrypt", response_model=Dict[str, str])
+def encrypt_payload(body: KeyData, request: Request):
+    if not body.key or not body.data:
         raise HTTPException(status_code=400, detail="Key and data are required")
     try:
-        f = Fernet(payload.key)
+        public_key = serialization.load_pem_public_key(body.key.encode())
     except Exception:
-        raise HTTPException(status_code=400, detail="Invalid Fernet key")
+        raise HTTPException(status_code=400, detail="Invalid public key (PEM expected)")
     try:
-        token = f.encrypt(payload.data.encode())
+        ciphertext = public_key.encrypt(
+            body.data.encode(),
+            padding.OAEP(mgf=padding.MGF1(hashes.SHA256()), algorithm=hashes.SHA256(), label=None)
+        )
+        token = base64.b64encode(ciphertext).decode()
     except Exception:
         raise HTTPException(status_code=500, detail="Encryption failed")
-    # log (consider masking sensitive data in production)
     try:
-        insert_log("encrypt", payload.data, request)
+        insert_log("encrypt", body.data, request)
     except Exception:
         pass
-    return {"data": token.decode()}
+    return {"data": token}
 
-
-@app.post("/api/v1/decrypt")
-def decrypt_payload(payload: KeyData, request: Request):
-    if not payload.key or not payload.data:
+@app.post("/api/v1/decrypt", response_model=Dict[str, str])
+def decrypt_payload(body: KeyData, request: Request):
+    if not body.key or not body.data:
         raise HTTPException(status_code=400, detail="Key and data are required")
     try:
-        f = Fernet(payload.key)
+        private_key = serialization.load_pem_private_key(body.key.encode(), password=None)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid private key")
     except Exception:
-        raise HTTPException(status_code=400, detail="Invalid Fernet key")
+        raise HTTPException(status_code=400, detail="Invalid private key (PEM expected)")
     try:
-        plain = f.decrypt(payload.data.encode())
-        text = plain.decode()
-    except InvalidToken:
+        ciphertext = base64.b64decode(body.data)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Encrypted data is not valid base64")
+    try:
+        plaintext = private_key.decrypt(
+            ciphertext,
+            padding.OAEP(mgf=padding.MGF1(hashes.SHA256()), algorithm=hashes.SHA256(), label=None)
+        ).decode()
+    except Exception:
         raise HTTPException(status_code=400, detail="Decryption failed: invalid token or key")
-    except Exception:
-        raise HTTPException(status_code=500, detail="Decryption failed")
     try:
-        insert_log("decrypt", text, request)
+        insert_log("decrypt", plaintext, request)
     except Exception:
         pass
-    return {"data": text}
+    return {"data": plaintext}
 
-
-@app.get("/api/v1/logs")
-def get_logs(size: int = 25, offset: int = 0) -> List[Dict[str, Any]]:
-    global DB_CONN
-    cur = DB_CONN.cursor()
-    cur.execute(
-        "SELECT id::text, timestamp, ip, action, data FROM logs ORDER BY timestamp DESC LIMIT %s OFFSET %s",
-        (size, offset),
-    )
+@app.get("/api/v1/logs", response_model=List[LogEntry])
+def get_logs(size: int = 25, offset: int = 0):
+    global _db
+    cur = _db.cursor()
+    # ORDER BY timestamp ASC so offset counts from beginning (oldest-first). Change if needed.
+    cur.execute("SELECT id::text, timestamp, ip, data FROM logs ORDER BY timestamp ASC LIMIT %s OFFSET %s", (size, offset))
     rows = cur.fetchall()
-    return [
-        {"id": r[0], "timestamp": r[1], "ip": r[2], "action": r[3], "data": r[4]}
-        for r in rows
-    ]
+    return [{"id": r[0], "timestamp": int(r[1]), "ip": r[2], "data": r[3]} for r in rows]
+
+@app.get("/api/v1/logs/count")
+def logs_count():
+    global _db
+    cur = _db.cursor()
+    cur.execute("SELECT COUNT(*) FROM logs")
+    total = cur.fetchone()[0]
+    return {"total": int(total)}

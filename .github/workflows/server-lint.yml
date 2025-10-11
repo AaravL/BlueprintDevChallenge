@@ -9,7 +9,7 @@ jobs:
         uses: actions/setup-python@v4
         with:
           python-version: "3.11"
-      - name: Install ruff
-        run: pip install ruff
+      - name: Install dev dependencies
+        run: pip install -r server/dev-requirements.txt
       - name: Run ruff linter
-        run: ruff server --exit-zero
+        run: ruff server

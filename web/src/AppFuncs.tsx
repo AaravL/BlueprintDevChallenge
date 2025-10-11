@@ -4,7 +4,7 @@ import axios from "axios";
 const API = (import.meta as any).env.VITE_API_URL || "http://localhost:8000";
 
 type LogEntry = {
-  id: number;
+  id: string;
   timestamp: number;
   ip?: string;
   action?: string;
@@ -17,23 +17,51 @@ export function EncryptForm(): JSX.Element {
   const [cipher, setCipher] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const sample =
-    "Hk3v1v0gZ0w4kYhR2pQ6v9u8jN3sXy1Zt5cB8rU0a1I=";
 
-  function generateFernetKey(): string {
-    const arr = new Uint8Array(32);
-    crypto.getRandomValues(arr);
-    // convert to base64 then to URL-safe base64
-    let b64 = btoa(String.fromCharCode(...arr));
-    b64 = b64.replace(/\+/g, "-").replace(/\//g, "_");
-    // keep padding (Fernet keys returned by libraries include padding)
-    return b64;
+  async function generateRSAKeypair(): Promise<{ publicPem: string; privatePem: string }> {
+    const kp = await crypto.subtle.generateKey(
+      {
+        name: "RSA-OAEP",
+        modulusLength: 2048,
+        publicExponent: new Uint8Array([1, 0, 1]),
+        hash: "SHA-256",
+      },
+      true,
+      ["encrypt", "decrypt"]
+    );
+
+    const spki = await crypto.subtle.exportKey("spki", kp.publicKey);
+    const pkcs8 = await crypto.subtle.exportKey("pkcs8", kp.privateKey);
+
+    const toPEM = (buf: ArrayBuffer, label: string) => {
+      const b64 = btoa(String.fromCharCode(...new Uint8Array(buf)));
+      const chunked = b64.match(/.{1,64}/g)?.join("\n") ?? b64;
+      return `-----BEGIN ${label}-----\n${chunked}\n-----END ${label}-----\n`;
+    };
+
+    return {
+      publicPem: toPEM(spki, "PUBLIC KEY"),
+      privatePem: toPEM(pkcs8, "PRIVATE KEY"),
+    };
   }
 
-  function handleGenerateKey() {
-    const k = generateFernetKey();
-    setKey(k);
-    setError(null);
+  async function handleGenerateKeypair() {
+    try {
+      setError(null);
+      const { publicPem, privatePem } = await generateRSAKeypair();
+      setKey(publicPem);
+      // try to copy private key to clipboard
+      try {
+        await navigator.clipboard.writeText(privatePem);
+        setError("Private key copied to clipboard — save it securely.");
+      } catch {
+        // if clipboard failed, show the private key in the error box (user can copy it)
+        setError("Generated private key (copy it now):\n\n" + privatePem);
+      }
+    } catch (e: any) {
+      console.error("Keygen failed", e);
+      setError("Failed to generate RSA keypair");
+    }
   }
 
   async function doEncrypt() {
@@ -42,11 +70,10 @@ export function EncryptForm(): JSX.Element {
     setLoading(true);
     try {
       const resp = await axios.post(`${API}/api/v1/encrypt`, {
-        key: key || sample,
+        key,
         data: plaintext || "hello-from-ui",
       });
-      // accept either { data } | { encrypted_data }
-      setCipher(resp.data?.data ?? resp.data?.encrypted_data ?? null);
+      setCipher(resp.data?.data ?? null);
     } catch (err: any) {
       const msg =
         err?.response?.data?.detail ??
@@ -63,14 +90,15 @@ export function EncryptForm(): JSX.Element {
 
   return (
     <div className="form">
-      <label>Fernet key (or leave blank to use sample)</label>
-      <input
+      <label>Public key (PEM)</label>
+      <textarea
         value={key}
         onChange={(e) => {
           setKey(e.target.value);
           setError(null);
         }}
-        placeholder={sample}
+        rows={6}
+        placeholder="Paste RSA public key (PEM format) here, or generate one"
       />
       <label>Plaintext</label>
       <textarea
@@ -96,13 +124,8 @@ export function EncryptForm(): JSX.Element {
         >
           Clear
         </button>
-        <button
-          className="secondary"
-          onClick={handleGenerateKey}
-          title="Generate a new Fernet key"
-          style={{ marginLeft: 6 }}
-        >
-          Generate key
+        <button className="secondary" onClick={handleGenerateKeypair} style={{ marginLeft: 6 }}>
+          Generate RSA keypair
         </button>
       </div>
 
@@ -116,6 +139,7 @@ export function EncryptForm(): JSX.Element {
             background: "#fff1f2",
             color: "#7f1d1d",
             border: "1px solid #fecaca",
+            whiteSpace: "pre-wrap",
           }}
         >
           {error}
@@ -148,8 +172,7 @@ export function DecryptForm(): JSX.Element {
         key,
         data: cipher,
       });
-      // accept either { data } | { decrypted_data }
-      setPlain(resp.data?.data ?? resp.data?.decrypted_data ?? null);
+      setPlain(resp.data?.data ?? null);
     } catch (err: any) {
       const msg =
         err?.response?.data?.detail ??
@@ -166,14 +189,15 @@ export function DecryptForm(): JSX.Element {
 
   return (
     <div className="form">
-      <label>Fernet key</label>
-      <input
+      <label>Private key (PEM)</label>
+      <textarea
         value={key}
         onChange={(e) => {
           setKey(e.target.value);
           setError(null);
         }}
-        placeholder="Paste your Fernet key"
+        rows={8}
+        placeholder="Paste RSA private key (PEM format) here"
       />
       <label>Encrypted data (base64)</label>
       <textarea
@@ -211,6 +235,7 @@ export function DecryptForm(): JSX.Element {
             background: "#fff1f2",
             color: "#7f1d1d",
             border: "1px solid #fecaca",
+            whiteSpace: "pre-wrap",
           }}
         >
           {error}
@@ -236,12 +261,18 @@ export function LogsViewer(): JSX.Element {
   const [totalLogs, setTotalLogs] = useState<number | null>(null);
   const [computingTotal, setComputingTotal] = useState(false);
 
+  // helper to fetch a specific page and return the entries
+  async function fetchPage(p = 0): Promise<LogEntry[]> {
+    const offset = p * pageSize;
+    const resp = await axios.get(`${API}/api/v1/logs?size=${pageSize}&offset=${offset}`);
+    return (resp.data as LogEntry[]) ?? [];
+  }
+
   async function fetchLogs(p = 0) {
     setLoading(true);
     try {
-      const offset = p * pageSize;
-      const resp = await axios.get(`${API}/api/v1/logs?size=${pageSize}&offset=${offset}`);
-      setLogs(resp.data as LogEntry[]);
+      const pageData = await fetchPage(p);
+      setLogs(pageData);
     } catch (err) {
       console.error("Failed to load logs", err);
       setLogs([]);
@@ -250,32 +281,37 @@ export function LogsViewer(): JSX.Element {
     }
   }
 
-  // compute total by paging until a page returns less than pageSize (capped)
-  async function computeTotalLogs(signal?: AbortSignal) {
+  async function fetchTotal() {
     setComputingTotal(true);
-    setTotalLogs(null);
+    try {
+      // Try the fast server-provided count endpoint first
+      const resp = await axios.get(`${API}/api/v1/logs/count`);
+      if (resp.status === 200 && typeof resp.data?.total === "number") {
+        setTotalLogs(resp.data.total);
+        return;
+      }
+    } catch {
+      // fall through to fallback counting
+    }
+
+    // Fallback: page through logs until a short page is returned (safe cap)
     try {
       let total = 0;
       let pageIndex = 0;
-      const maxTotal = 200000; // safety cap
-      while (true) {
+      const maxPages = 200; // safety cap to avoid huge workloads
+      while (pageIndex < maxPages) {
         const offset = pageIndex * pageSize;
-        const resp = await axios.get(`${API}/api/v1/logs?size=${pageSize}&offset=${offset}`, { signal });
-        const pageData = resp.data as LogEntry[];
+        const resp = await axios.get(`${API}/api/v1/logs?size=${pageSize}&offset=${offset}`);
+        const pageData = resp.data as LogEntry[] | null;
         const n = Array.isArray(pageData) ? pageData.length : 0;
         total += n;
         if (n < pageSize) break;
         pageIndex += 1;
-        if (total >= maxTotal) break;
       }
       setTotalLogs(total);
-    } catch (err: any) {
-      if (err?.name === "CanceledError" || err?.message === "canceled") {
-        // aborted by user/unmount
-      } else {
-        console.error("Failed to compute total logs", err);
-        setTotalLogs(null);
-      }
+    } catch (err) {
+      console.error("Failed to compute total logs", err);
+      setTotalLogs(null);
     } finally {
       setComputingTotal(false);
     }
@@ -284,16 +320,14 @@ export function LogsViewer(): JSX.Element {
   useEffect(() => {
     fetchLogs(page);
     const id = setInterval(() => fetchLogs(page), 5000);
-    // compute total on mount
-    const ac = new AbortController();
-    computeTotalLogs(ac.signal);
-     return () => clearInterval(id);
-   }, [page]);
+    fetchTotal();
+    return () => clearInterval(id);
+  }, [page]);
 
   return (
     <div>
       <div className="row">
-        <button onClick={() => { fetchLogs(page); /* also refresh total */ const ac = new AbortController(); computeTotalLogs(ac.signal); }} disabled={loading}>Refresh</button>
+        <button onClick={() => { fetchLogs(page); fetchTotal(); }} disabled={loading}>Refresh</button>
         <div className="muted">
           {loading ? "Loading..." : `${logs.length} entries (page size ${pageSize})`}
           &nbsp;•&nbsp;Total:&nbsp;
@@ -301,9 +335,34 @@ export function LogsViewer(): JSX.Element {
         </div>
       </div>
 
-      <div className="row" style={{marginTop:8,gap:6}}>
-        <button onClick={() => setPage((p) => Math.max(0, p - 1))} disabled={page === 0}>Prev</button>
-        <button onClick={() => setPage((p) => p + 1)}>Next</button>
+      <div className="row" style={{ marginTop: 8, gap: 6 }}>
+        <button
+          onClick={async () => {
+            if (page === 0) return;
+            const prevPage = page - 1;
+            setPage(prevPage);
+          }}
+          disabled={page === 0}
+        >
+          Prev
+        </button>
+        <button
+          onClick={async () => {
+            // attempt to fetch the next page first; only advance if it has entries
+            try {
+              const nextData = await fetchPage(page + 1);
+              if (nextData.length > 0) {
+                setPage((p) => p + 1);
+                setLogs(nextData);
+              } // otherwise do nothing (no more pages)
+            } catch (err) {
+              console.error("Failed to fetch next page", err);
+            }
+          }}
+          disabled={loading}
+        >
+          Next
+        </button>
         <div className="muted">Page {page + 1}</div>
       </div>
 
@@ -330,9 +389,7 @@ export function LogsViewer(): JSX.Element {
             ))}
             {logs.length === 0 && (
               <tr>
-                <td colSpan={5} className="muted">
-                  No logs
-                </td>
+                <td colSpan={5} className="muted">No logs</td>
               </tr>
             )}
           </tbody>

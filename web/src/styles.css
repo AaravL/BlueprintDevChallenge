@@ -105,6 +105,38 @@ button[disabled]{opacity:.6;cursor:not-allowed}
 
 /* logs table */
 .table-wrap{overflow:auto;margin-top:10px}
+
+/* table layout: prevent cells from expanding page width */
+.table-wrap {
+  overflow-x: auto;
+}
+
+/* make table use fixed layout so cells respect width and wrap */
+.table-wrap table {
+  width: 100%;
+  table-layout: fixed;
+}
+
+/* monospace / data cells: allow wrapping of long tokens (base64/ciphertext) */
+.mono,
+.table-wrap td.mono,
+.table-wrap td.small,
+pre.mono {
+  font-family: var(--mono-font, ui-monospace, SFMono-Regular, Menlo, Monaco, "Roboto Mono", "Courier New", monospace);
+  white-space: pre-wrap;      /* allow wrapping and preserve line breaks */
+  word-break: break-word;     /* break long words when needed */
+  overflow-wrap: anywhere;    /* aggressive wrapping for long strings */
+  max-width: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+/* ensure table cells don't overflow horizontally */
+.table-wrap td {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .logs{width:100%;border-collapse:collapse;font-size:13px}
 .logs th,.logs td{text-align:left;padding:10px;border-bottom:1px solid #f0f3f7}
 .logs th{font-weight:700;color:var(--muted);font-size:12px}

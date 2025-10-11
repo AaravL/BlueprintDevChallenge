@@ -1,9 +1,9 @@
 # Blueprint Dev Challenge — SecureLog
 
-Quick overview
+Overview
 
 - Frontend: React + Vite (web/)
-- Backend: FastAPI (server/) — encrypt/decrypt endpoints + logs stored in Postgres
+- Backend: FastAPI (server/) — encrypt/decrypt endpoints (RSA) + logs stored in Postgres
 - DB: PostgreSQL (db service in docker-compose)
 
 Run locally (Docker)
@@ -17,32 +17,67 @@ Run locally (Docker)
    - Frontend: http://localhost:5173
    - API docs: http://localhost:8000/docs
 
-Dev (frontend)
-cd web
-npm install
-$env:VITE_API_URL='http://localhost:8000'
-npm run dev
+Generate RSA keypair (example)
+
+- Linux / macOS:
+  ```bash
+  openssl genpkey -algorithm RSA -out private.pem -pkeyopt rsa_keygen_bits:2048
+  openssl rsa -pubout -in private.pem -out public.pem
+  ```
+- Windows (WSL or Git Bash): use same commands
+- The frontend includes a "Generate RSA keypair" button which will populate the public key and copy the private key to clipboard (save it securely).
 
 Sample API requests
 
-# Encrypt
+- Encrypt (use public.pem). Example using jq to embed PEM into JSON (Linux/macOS):
 
-curl -s -X POST http://localhost:8000/api/v1/encrypt \
- -H "Content-Type: application/json" \
- -d '{"key":"<FERNET_KEY>","data":"hello"}' | jq
+  ```bash
+  curl -s -X POST http://localhost:8000/api/v1/encrypt \
+    -H "Content-Type: application/json" \
+    -d "$(jq -n --arg k "$(cat public.pem)" --arg d "hello" '{key:$k,data:$d}')" | jq
+  ```
 
-# Decrypt
+  PowerShell (Windows):
 
-curl -s -X POST http://localhost:8000/api/v1/decrypt \
- -H "Content-Type: application/json" \
- -d '{"key":"<FERNET_KEY>","data":"<ENCRYPTED>"}' | jq
+  ```powershell
+  $pub = Get-Content -Raw public.pem
+  $body = @{ key = $pub; data = "hello" } | ConvertTo-Json
+  curl.exe -s -X POST http://localhost:8000/api/v1/encrypt -H "Content-Type: application/json" -d $body
+  ```
 
-# Logs (paginated)
+- Decrypt (use private.pem). Example (Linux/macOS):
 
-curl -s "http://localhost:8000/api/v1/logs?size=25&offset=0" | jq
+  ```bash
+  # assume $CIPHERTEXT contains base64 ciphertext from encrypt response
+  curl -s -X POST http://localhost:8000/api/v1/decrypt \
+    -H "Content-Type: application/json" \
+    -d "$(jq -n --arg k "$(cat private.pem)" --arg d "$CIPHERTEXT" '{key:$k,data:$d}')" | jq
+  ```
 
-Notes
+- Logs (paginated)
 
-- Backend returns {"data": "<payload>"} for both encrypt and decrypt.
-- Invalid or malformed Fernet keys now return 400 with a clear error message.
-- CI lint workflows included: .github/workflows/server-lint.yml and web-lint.yml
+  ```bash
+  curl -s "http://localhost:8000/api/v1/logs?size=25&offset=0" | jq
+  ```
+
+- Total logs
+  ```bash
+  curl -s "http://localhost:8000/api/v1/logs/count" | jq
+  ```
+
+Notes / API contract
+
+- POST /api/v1/encrypt accepts JSON { "key": "<RSA public PEM>", "data": "<plaintext>" } and responds { "data": "<base64 ciphertext>" }.
+- POST /api/v1/decrypt accepts JSON { "key": "<RSA private PEM>", "data": "<base64 ciphertext>" } and responds { "data": "<plaintext>" }.
+- GET /api/v1/logs?size=<n>&offset=<m> returns an array of logs with objects exactly: { id: string (UUID), timestamp: int (UNIX seconds), ip: string, data: string }.
+- Logs are stored in Postgres; id is UUID and timestamp is UNIX seconds.
+
+Rebuild & test
+
+```powershell
+cd C:\Users\Aarav\Documents\Schoolwork\BlueprintDevChallenge
+docker compose down -v
+docker compose build --no-cache
+docker compose up -d
+docker compose logs -f server web db
+```
